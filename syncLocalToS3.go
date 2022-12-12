@@ -98,6 +98,7 @@ func compareList(listSource []string, listDestination []string) []string {
 			if lastCharact != "/" {
 				listDiff = append(listDiff, objectSource)
 			}
+			//listDiff = append(listDiff, objectSource)
 		}
 	} // END for objectSource
 	return listDiff
@@ -178,6 +179,7 @@ func uploadListOfFileToS3(bucketName string, listObjects []string, awsProfile st
 	return
 }
 
+/*
 func cleanLocalFolder(pathFolder string, listObjects []string) (err error) {
 
 	for _, object := range listObjects {
@@ -191,6 +193,7 @@ func cleanLocalFolder(pathFolder string, listObjects []string) (err error) {
 
 	return
 }
+*/
 
 func removeWorkdirFolder(pathFolder string) (err error) {
 	err = os.RemoveAll(pathFolder)
@@ -199,6 +202,7 @@ func removeWorkdirFolder(pathFolder string) (err error) {
 
 }
 
+/*
 func listBucketS3(awsProfile string) {
 
 	// Load creds
@@ -217,6 +221,7 @@ func listBucketS3(awsProfile string) {
 		}
 	}
 }
+*/
 
 func encryptFile(filename string, folderPathFile string, destinationFolder string) {
 	// Reading plaintext file
@@ -244,7 +249,7 @@ func encryptFile(filename string, folderPathFile string, destinationFolder strin
 
 	// Writing ciphertext file
 	err = ioutil.WriteFile(destinationFolder+"/"+filename, cipherText, 0777)
-	checkError(err, "func encryptFile : write file err")
+	checkError(err, "func encryptFile : write file err : "+filename)
 
 }
 
@@ -351,16 +356,23 @@ func createFolderIfIsNeeded(listFile []string, destinationFolder string) {
 
 }
 
+func createWorkdir(workdirDownload string, workdirUpload string) {
+
+	err := os.MkdirAll(workdirDownload, os.ModePerm)
+	checkError(err, "Func createWorkdir , mkdirAll workdirDownload")
+
+	err = os.MkdirAll(workdirUpload, os.ModePerm)
+	checkError(err, "Func createWorkdir , mkdirAll workdirUpload")
+
+}
+
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 var (
-	keyPath  string = "config/key.txt"
-	pathSync string = "syncFolder"
-	//pathWorkdir string = "workdir"
+	keyPath    string = "config/key.txt"
+	pathSync   string = "syncFolder"
 	awsProfile string = "AWS_PERSO"
 	awsBucket  string = "florian-drive"
-	//pathWorkdirDownload string = "workdirDownload"
-	//pathWorkdirUpload   string = "workdirDownload"
 )
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -369,8 +381,8 @@ var (
 
 func main() {
 
-	pathWorkdirDownload := "workdirDownload"
-	pathWorkdirUpload := "workdirUpload"
+	pathWorkdirDownload := ".workdirDownload"
+	pathWorkdirUpload := ".workdirUpload"
 
 	listFileBucket := listFileInBucketS3(awsBucket, awsProfile)
 	fmt.Println("\nS3 : file count : ", len((listFileBucket)))
@@ -380,9 +392,13 @@ func main() {
 
 	listDiffMissingS3 := compareList(listFileLocal, listFileBucket)
 	fmt.Println("\nMissing files on S3 : ", len(listDiffMissingS3))
+	//fmt.Println("\nMissing files on S3 : ", listDiffMissingS3)
 
 	listDiffMissingLocal := compareList(listFileBucket, listFileLocal)
 	fmt.Println("\nMissing files on local : ", len(listDiffMissingLocal))
+	//fmt.Println("\nMissing files on local : ", listDiffMissingLocal)
+
+	createWorkdir(pathWorkdirDownload, pathWorkdirUpload)
 
 	createFolderIfIsNeeded(listDiffMissingS3, pathWorkdirUpload)
 	createFolderIfIsNeeded(listDiffMissingS3, pathSync)

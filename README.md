@@ -16,6 +16,13 @@ go get github.com/aws/aws-sdk-go-v2/feature/s3/manager
 go get github.com/aws/aws-sdk-go-v2/service/s3
 
 ```
+## Set your key and store it ( can be 8 / 16 / 32 charac )
+```
+config/key.txt
+```
+
+## Don't loose your key ! Keep it safe 
+
 
 ## What is done by the script :
 #### syncLocalToS3.go : sync local folder and target S3 bucket.
@@ -24,6 +31,7 @@ go get github.com/aws/aws-sdk-go-v2/service/s3
 ```
 go run syncLocalToS3.go
 ```
+
 
 
 
