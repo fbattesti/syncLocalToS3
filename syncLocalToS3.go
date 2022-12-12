@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -18,6 +19,7 @@ import (
 // Custom error management because i don't like the Go best practice
 func checkError(err error, message string) int {
 	if err != nil {
+		fmt.Println("\n#########################################################")
 		log.Fatalln("ERROR IN SECTION : ", message, "\nERROR = ", err)
 		return 1
 	}
@@ -78,7 +80,7 @@ func listFileInBucketS3(bucketName string, awsProfile string) []string {
 	return sliceListObj
 } // END func listFileInBucketS3
 
-func compareObject(listSource []string, listDestination []string) []string {
+func compareList(listSource []string, listDestination []string) []string {
 
 	listDiff := []string{}
 
@@ -91,7 +93,11 @@ func compareObject(listSource []string, listDestination []string) []string {
 			}
 		}
 		if countainObject == 0 {
-			listDiff = append(listDiff, objectSource)
+			lastCharact := objectSource[len(objectSource)-1:]
+			// If is not a folder add it
+			if lastCharact != "/" {
+				listDiff = append(listDiff, objectSource)
+			}
 		}
 	} // END for objectSource
 	return listDiff
@@ -108,9 +114,16 @@ func downloadListOfS3Object(bucketName string, listObjects []string, pathFolderW
 
 	for _, object := range listObjects {
 
-		// Create a file to download to
+		// Create a file to download
 		file, err := os.Create(pathFolderWhereDownload + "/" + object)
-		checkError(err, "Create file local ")
+		if err != nil {
+			if strings.Contains(err.Error(), "is a directory") {
+				// DO NOTHING
+			} else {
+				checkError(err, "func downloadListOfS3Object : create file local ")
+			}
+		}
+
 		defer file.Close()
 
 		// download file
@@ -133,7 +146,7 @@ func uploadListOfFileToS3(bucketName string, listObjects []string, awsProfile st
 	for _, object := range listObjects {
 
 		file, err := os.Open(folderPath + "/" + object)
-		checkError(err, "load local file ")
+		checkError(err, "load local file for upload ")
 		defer file.Close()
 
 		uploader := manager.NewUploader(s3Client)
@@ -142,7 +155,18 @@ func uploadListOfFileToS3(bucketName string, listObjects []string, awsProfile st
 			Key:    aws.String(object),
 			Body:   file,
 		})
-		checkError(err, "error when upload file : "+object)
+		///checkError(err, "error when upload file : "+object)
+
+		if err != nil {
+			// if it's a directory is not an error AWS S3 directory do not exist, i just pass
+			if strings.Contains(err.Error(), "is a directory") {
+				// nothing to do
+			} else {
+				checkError(err, "error when upload file : "+object)
+
+			}
+		}
+
 		// low cost loading bar
 		//fmt.Printf("^")
 	} // END for
@@ -154,16 +178,25 @@ func uploadListOfFileToS3(bucketName string, listObjects []string, awsProfile st
 	return
 }
 
-func cleanLocalFolder(listObjects []string) (err error) {
+func cleanLocalFolder(pathFolder string, listObjects []string) (err error) {
 
 	for _, object := range listObjects {
-		err := os.Remove(object)
+		//err := os.Remove(pathFolder + "/" + object)
+		err := os.RemoveAll(pathFolder + "/" + object)
 		checkError(err, "delete local file name :"+object)
 	}
 	if len(listObjects) != 0 {
 		fmt.Println("\nClean local folder finish")
 	}
+
 	return
+}
+
+func removeWorkdirFolder(pathFolder string) (err error) {
+	err = os.RemoveAll(pathFolder)
+	checkError(err, "Delete local folder : "+pathFolder)
+	return
+
 }
 
 func listBucketS3(awsProfile string) {
@@ -218,31 +251,41 @@ func encryptFile(filename string, folderPathFile string, destinationFolder strin
 func decryptFile(fileEncrypted string, pathFileEncrypted string, pathFileDecrypted string) {
 	//func decryptFile(fileEncrypted string, folderPathWhereDownlaod string, folderPathWhereDecryptFile string) {
 
+	isAFile := true
 	// Reading ciphertext file
 	cipherText, err := ioutil.ReadFile(pathFileEncrypted + "/" + fileEncrypted)
-	checkError(err, "func decryptFile : read file Encrypted")
+	if err != nil {
+		if strings.Contains(err.Error(), "is a directory") {
+			// DO NOTHING
+			isAFile = false
+		} else {
+			checkError(err, "func decryptFile : read file Encrypted")
+		}
+	}
 
-	// Reading key
-	key, err := ioutil.ReadFile(keyPath)
-	checkError(err, "func decryptFile : read key file")
+	if isAFile {
+		// Reading key
+		key, err := ioutil.ReadFile(keyPath)
+		checkError(err, "func decryptFile : read key file")
 
-	// Creating block of algorithm
-	block, err := aes.NewCipher(key)
-	checkError(err, "func decryptFile : cipher err")
+		// Creating block of algorithm
+		block, err := aes.NewCipher(key)
+		checkError(err, "func decryptFile : cipher err")
 
-	// Creating GCM mode
-	gcm, err := cipher.NewGCM(block)
-	checkError(err, "func decryptFile : cipher GCM err")
+		// Creating GCM mode
+		gcm, err := cipher.NewGCM(block)
+		checkError(err, "func decryptFile : cipher GCM err")
 
-	// Deattached nonce and decrypt
-	nonce := cipherText[:gcm.NonceSize()]
-	cipherText = cipherText[gcm.NonceSize():]
-	plainText, err := gcm.Open(nil, nonce, cipherText, nil)
-	checkError(err, "func decryptFile : decrypt file err")
+		// Deattached nonce and decrypt
+		nonce := cipherText[:gcm.NonceSize()]
+		cipherText = cipherText[gcm.NonceSize():]
+		plainText, err := gcm.Open(nil, nonce, cipherText, nil)
+		checkError(err, "func decryptFile : decrypt file : "+fileEncrypted)
 
-	// Writing decryption content
-	err = ioutil.WriteFile(pathFileDecrypted+"/"+fileEncrypted, plainText, 0777)
-	checkError(err, "func decryptFile : write file err")
+		// Writing decryption content
+		err = ioutil.WriteFile(pathFileDecrypted+"/"+fileEncrypted, plainText, 0777)
+		checkError(err, "func decryptFile : write file err")
+	}
 
 }
 
@@ -252,42 +295,72 @@ func listLocalFile(path string) []string {
 
 	listFiles := []string{}
 	for _, file := range files {
-		//fmt.Println(file.Name(), file.IsDir())
-		listFiles = append(listFiles, file.Name())
+		if !file.IsDir() {
+			listFiles = append(listFiles, file.Name())
+		} else {
+			// list sub folder an call this func
+			subFolder := file.Name()
+			listSubFiles := listLocalFile(path + "/" + file.Name())
+			for _, file := range listSubFiles {
+				listFiles = append(listFiles, subFolder+"/"+file)
+			}
+		}
 
 	}
 	return listFiles
 }
 
-func encryptFilesAndUploadToS3(listFile []string) {
+func encryptFilesAndUploadToS3(listFile []string, workdirForUpload string) {
 
 	for _, file := range listFile {
-		encryptFile(file, pathSync, pathWorkdir)
+		encryptFile(file, pathSync, workdirForUpload)
 	}
-	uploadListOfFileToS3(awsBucket, listFile, awsProfile, pathWorkdir)
+	uploadListOfFileToS3(awsBucket, listFile, awsProfile, workdirForUpload)
 
+	//cleanLocalFolder(workdirForUpload, listFile)
+	removeWorkdirFolder(workdirForUpload)
 	fmt.Println("Upload finish")
 
 }
 
-func downloadToLocalAndDecryptFiles(listFileToDownload []string) {
+func downloadToLocalAndDecryptFiles(listFileToDownload []string, workdirForDownload string) {
 
-	downloadListOfS3Object(awsBucket, listFileToDownload, pathWorkdir, awsProfile)
+	downloadListOfS3Object(awsBucket, listFileToDownload, workdirForDownload, awsProfile)
 	for _, file := range listFileToDownload {
-		decryptFile(file, pathWorkdir, pathSync)
+		decryptFile(file, workdirForDownload, pathSync)
 	}
 
+	//cleanLocalFolder(workdirForDownload, listFileToDownload)
+	removeWorkdirFolder(workdirForDownload)
 	fmt.Println("Download finish")
 }
 
-/////////////////////
+func createFolderIfIsNeeded(listFile []string, destinationFolder string) {
+
+	// forEach file , spit the path with "/" and if < 1 make the directory
+	for _, path := range listFile {
+		pathOfTheFilename := strings.Split(path, "/")
+		if len(pathOfTheFilename) > 1 {
+			pathMkdir := strings.Join(pathOfTheFilename[0:len(pathOfTheFilename)-1], "/")
+			err := os.MkdirAll(destinationFolder+"/"+pathMkdir, os.ModePerm)
+			fmt.Println("Create folder : ", pathMkdir, " In folder : ", destinationFolder)
+			checkError(err, "Func createFolderIfIsNeeded , mkdirAll")
+		}
+
+	}
+
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 var (
-	keyPath     string = "config/key.txt"
-	pathSync    string = "syncFolder"
-	pathWorkdir string = "workdir"
-	awsProfile  string = "AWS_PERSO"
-	awsBucket   string = "florian-drive"
+	keyPath  string = "config/key.txt"
+	pathSync string = "syncFolder"
+	//pathWorkdir string = "workdir"
+	awsProfile string = "AWS_PERSO"
+	awsBucket  string = "florian-drive"
+	//pathWorkdirDownload string = "workdirDownload"
+	//pathWorkdirUpload   string = "workdirDownload"
 )
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -296,8 +369,8 @@ var (
 
 func main() {
 
-	//listBucketS3(awsProfile)
-	listLocalFile(pathSync)
+	pathWorkdirDownload := "workdirDownload"
+	pathWorkdirUpload := "workdirUpload"
 
 	listFileBucket := listFileInBucketS3(awsBucket, awsProfile)
 	fmt.Println("\nS3 : file count : ", len((listFileBucket)))
@@ -305,13 +378,18 @@ func main() {
 	listFileLocal := listLocalFile(pathSync)
 	fmt.Println("\nLocal : file count : ", len((listFileLocal)))
 
-	listDiffMissingS3 := compareObject(listFileLocal, listFileBucket)
+	listDiffMissingS3 := compareList(listFileLocal, listFileBucket)
 	fmt.Println("\nMissing files on S3 : ", len(listDiffMissingS3))
 
-	listDiffMissingLocal := compareObject(listFileBucket, listFileLocal)
+	listDiffMissingLocal := compareList(listFileBucket, listFileLocal)
 	fmt.Println("\nMissing files on local : ", len(listDiffMissingLocal))
 
-	encryptFilesAndUploadToS3(listDiffMissingS3)
-	downloadToLocalAndDecryptFiles(listDiffMissingLocal)
+	createFolderIfIsNeeded(listDiffMissingS3, pathWorkdirUpload)
+	createFolderIfIsNeeded(listDiffMissingS3, pathSync)
+	createFolderIfIsNeeded(listDiffMissingLocal, pathWorkdirDownload)
+	createFolderIfIsNeeded(listDiffMissingLocal, pathSync)
+
+	encryptFilesAndUploadToS3(listDiffMissingS3, pathWorkdirUpload)
+	downloadToLocalAndDecryptFiles(listDiffMissingLocal, pathWorkdirDownload)
 
 } // END main
